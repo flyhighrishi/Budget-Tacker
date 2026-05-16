@@ -1,26 +1,68 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
-import math
+import sqlite3
+from datetime import datetime, timedelta
 
 # ==========================================
-# 1. PAGE CONFIGURATION & SESSION STATE
+# 1. DATABASE LAYER & CORE INITIALIZATION
 # ==========================================
-st.set_page_config(page_title="Personal Wealth Engine", layout="wide")
+DB_FILE = "wealth.db"
 
-# Core ledger state
-if "expenses" not in st.session_state:
-    st.session_state.expenses = pd.DataFrame(columns=["Date", "Description", "Category", "Amount"])
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT,
+            description TEXT,
+            category TEXT,
+            amount REAL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS historical_snapshots (
+            month TEXT PRIMARY KEY,
+            net_salary REAL,
+            structural_outflows REAL,
+            total_invested REAL,
+            portfolio_value REAL
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-# 🆕 Financial Goals Sinking Fund State
+init_db()
+
+# Seed default historical data if empty
+def seed_mock_historical_data():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM historical_snapshots")
+    if cursor.fetchone()[0] == 0:
+        mock_data = [
+            ("2026-01", 150000.0, 44000.0, 21200.0, 480000.0),
+            ("2026-02", 150000.0, 44000.0, 21200.0, 502000.0),
+            ("2026-03", 150000.0, 44000.0, 21200.0, 515000.0),
+            ("2026-04", 150000.0, 44000.0, 21200.0, 540000.0),
+        ]
+        cursor.executemany("INSERT OR REPLACE INTO historical_snapshots VALUES (?,?,?,?,?)", mock_data)
+        conn.commit()
+    conn.close()
+
+seed_mock_historical_data()
+
+# Page Setup
+st.set_page_config(page_title="Personal Wealth Engine v3", layout="wide")
+
+# Persistent Session Variables
 if "goals" not in st.session_state:
     st.session_state.goals = [
-        {"Name": "Nepal Milestone Travel (Dec 2026)", "Target": 150000.0, "Saved": 40000.0, "Date": "2026-12-01"},
-        {"Name": "Home Capital Buffer", "Target": 500000.0, "Saved": 150000.0, "Date": "2027-06-01"}
+        {"Name": "Nepal Milestone Travel (Dec 2026)", "Target": 150000.0, "Saved": 50000.0, "Date": "2026-12-01"},
+        {"Name": "Home Capital Buffer", "Target": 500000.0, "Saved": 160000.0, "Date": "2027-06-01"}
     ]
 
-# 🆕 Current Investment Portfolio holdings for tracking asset drift
 if "portfolio_holdings" not in st.session_state:
     st.session_state.portfolio_holdings = {
         "Equity": 380000.0,
@@ -32,282 +74,268 @@ if "sip_checklist" not in st.session_state:
     st.session_state.sip_checklist = {}
 
 # ==========================================
-# 2. HELPER FUNCTIONS & MATH ENGINES
+# 2. CORE MATHEMATICAL LOGIC ENGINES
 # ==========================================
-def calculate_budget(base_disposable, monthly_utilities, total_goal_sinking_fund):
-    """Calculates allocations and deducts goal sinking funds from discretionary pool."""
-    total_essentials = base_disposable * 0.50
-    gross_discretionary = base_disposable * 0.30
-    investing = base_disposable * 0.20
-    
-    # Sinking funds drain directly from Discretionary (Wants) capacity
-    net_discretionary = max(0.0, gross_discretionary - total_goal_sinking_fund)
-    other_essentials_left = max(0.0, total_essentials - monthly_utilities)
-    
-    return {
-        "Essentials (Needs)": total_essentials,
-        "Gross Discretionary": gross_discretionary,
-        "Goal Sinking Reserves": total_goal_sinking_fund,
-        "Net Discretionary (Guilt-Free)": net_discretionary,
-        "Investing (Savings)": investing,
-        "_meta_other_essentials": other_essentials_left
-    }
+def load_expenses_from_db():
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query("SELECT * FROM expenses ORDER BY date DESC", conn)
+    conn.close()
+    return df
+
+def save_expense_to_db(date_str, desc, cat, amt):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO expenses (date, description, category, amount) VALUES (?, ?, ?, ?)", (date_str, desc, cat, amt))
+    conn.commit()
+    conn.close()
 
 def get_target_weights(risk_profile):
     if risk_profile == "Conservative":
         return {"Equity": 0.25, "Debt/Fixed Income": 0.55, "Emergency/Liquid": 0.20}
     elif risk_profile == "Moderate":
         return {"Equity": 0.55, "Debt/Fixed Income": 0.35, "Emergency/Liquid": 0.10}
-    else: # Aggressive
+    else:
         return {"Equity": 0.75, "Debt/Fixed Income": 0.15, "Emergency/Liquid": 0.10}
 
 # ==========================================
-# 3. SIDEBAR CONTROLS (FINANCIAL PARAMETERS)
+# 3. SIDEBAR PARAMETERS (CONTROL DECK)
 # ==========================================
-st.sidebar.header("🎯 Financial Parameters")
+st.sidebar.header("🎯 Master Control Deck")
 gross_salary = st.sidebar.number_input("Monthly Net Salary (INR):", min_value=0, value=150000, step=5000)
 
-st.sidebar.subheader("🪓 Fixed Monthly Debt Obligations")
+st.sidebar.subheader("🪓 Monthly Loan EMIs")
 home_loan_emi = st.sidebar.number_input("Home Loan EMI (INR):", min_value=0, value=35000, step=1000)
 personal_loan_emi = st.sidebar.number_input("Personal Loan EMI (INR):", min_value=0, value=8000, step=500)
 
-st.sidebar.subheader("🚰 Regular Utilities & Taxes")
+st.sidebar.subheader("🚰 Fixed Utilities & Taxes")
 electricity_bill = st.sidebar.number_input("Avg Electricity Bill / Month (INR):", min_value=0, value=3500, step=500)
 water_bill = st.sidebar.number_input("Avg Water Bill / Month (INR):", min_value=0, value=500, step=100)
 annual_property_tax = st.sidebar.number_input("Annual Property Tax (INR):", min_value=0, value=12000, step=1000)
 
-# Structural Matrix Math
+# Structural Calculations
 monthly_property_tax_cushion = annual_property_tax / 12
 total_fixed_structural_outflow = home_loan_emi + personal_loan_emi + monthly_property_tax_cushion
 disposable_income_pool = max(0, gross_salary - total_fixed_structural_outflow)
 total_monthly_utilities = electricity_bill + water_bill
 
-risk_profile = st.sidebar.selectbox("Risk Appetite Profile:", ["Conservative", "Moderate", "Aggressive"], index=1)
+risk_profile = st.sidebar.selectbox("Risk Appetite Strategy:", ["Conservative", "Moderate", "Aggressive"], index=1)
 
-# ==========================================
-# 4. 🆕 GOAL SINKING FUNDS CALCULATION ENGINE
-# ==========================================
+# Goal execution processing
 total_monthly_goal_sinking = 0.0
-calculated_goals_list = []
-
 current_date = datetime.today()
-
 for goal in st.session_state.goals:
     target_date = datetime.strptime(goal["Date"], "%Y-%m-%d")
-    # Calculate difference in months
-    months_remaining = (target_date.year - current_date.year) * 12 + (target_date.month - current_date.month)
-    months_remaining = max(1, months_remaining) # Avoid divide by zero or negative months
-    
-    amount_needed = max(0.0, goal["Target"] - goal["Saved"])
-    monthly_allocation = amount_needed / months_remaining
-    total_monthly_goal_sinking += monthly_allocation
-    
-    calculated_goals_list.append({
-        "Name": goal["Name"],
-        "Target": goal["Target"],
-        "Saved": goal["Saved"],
-        "Months Left": months_remaining,
-        "Monthly Runrate": monthly_allocation
-    })
+    months_remaining = max(1, (target_date.year - current_date.year) * 12 + (target_date.month - current_date.month))
+    total_monthly_goal_sinking += (max(0.0, goal["Target"] - goal["Saved"]) / months_remaining)
 
-# Evaluate Budgets
-budget = calculate_budget(disposable_income_pool, total_monthly_utilities, total_monthly_goal_sinking)
-target_weights = get_target_weights(risk_profile)
-monthly_investment_bucket = budget["Investing (Savings)"]
+# Budget calculations
+essentials_target = disposable_income_pool * 0.50
+gross_discretionary = disposable_income_pool * 0.30
+investing_target = disposable_income_pool * 0.20
+net_discretionary_guilt_free = max(0.0, gross_discretionary - total_monthly_goal_sinking)
 
 # ==========================================
-# 5. DASHBOARD LAYOUT & METRICS
+# 4. PRIMARY NAVIGATION DECK (THE TABS)
 # ==========================================
-st.title("💸 Advanced Personal Wealth & Intelligent Rebalancing Dashboard")
+st.title("💸 Personal Finance Workspace & Intelligence Center")
 st.markdown("---")
 
-# High-Level System Metrics Row
-m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-with m_col1:
-    st.metric("Fixed Structural Outflows", f"₹{total_fixed_structural_outflow:,.2f}")
-with m_col2:
-    st.metric("Essentials Bucket (50%)", f"₹{budget['Essentials (Needs)']:,.2f}")
-with m_col3:
-    st.metric("Goal Sinking Deductions", f"₹{budget['Goal Sinking Reserves']:,.2f}", delta="Deducted from Wants", delta_color="inverse")
-with m_col4:
-    st.metric("Net Guilt-Free Wants (30%)", f"₹{budget['Net Discretionary (Guilt-Free)']:,.2f}")
+tab_dashboard, tab_runway, tab_tax, tab_ledger, tab_payday = st.tabs([
+    "📊 Monthly Overview Dashboard",
+    "🔮 Predictive Cash Flow Runway",
+    "🛡️ Tax Optimization Matrix",
+    "🛒 Local Transaction Ledger",
+    "📈 Payday Execution Room"
+])
 
-st.markdown("---")
-
-# Visual Structural Allocations
-left_chart_col, right_chart_col = st.columns(2)
-with left_chart_col:
-    st.subheader("Total Salary Capital Breakdown")
-    all_allocations = {
-        "Debt Structural EMIs": home_loan_emi + personal_loan_emi,
-        "Property Tax Cushion": monthly_property_tax_cushion,
-        "Fixed Base Utilities": total_monthly_utilities,
-        "Other Operational Essentials": budget["_meta_other_essentials"],
-        "Goal Sinking Reserves": budget["Goal Sinking Reserves"],
-        "Net Guilt-Free Cash": budget["Net Discretionary (Guilt-Free)"],
-        "Systematic Core Investments": budget["Investing (Savings)"]
-    }
-    fig_budget = px.pie(names=list(all_allocations.keys()), values=list(all_allocations.values()), color_discrete_sequence=px.colors.qualitative.Pastel)
-    st.plotly_chart(fig_budget, use_container_width=True)
-
-with right_chart_col:
-    st.subheader("💡 Dynamic Goal Sinking Ledger")
-    goals_df = pd.DataFrame(calculated_goals_list)
-    if not goals_df.empty:
-        st.dataframe(goals_df[["Name", "Target", "Saved", "Months Left", "Monthly Runrate"]], use_container_width=True, hide_index=True)
-        for g in calculated_goals_list:
-            progress_pct = min(g["Saved"] / g["Target"], 1.0)
-            st.caption(f"**{g['Name']}** Progress: {progress_pct*100:.1f}% (Need ₹{g['Monthly Runrate']:,.2f}/mo)")
-            st.progress(progress_pct)
-
-# ==========================================
-# 6. 🆕 INTELLIGENT INVESTMENT REBALANCING MATRIX
-# ==========================================
-st.markdown("---")
-st.header("🎯 Portfolio Health & Smart Rebalancing Engine")
-
-# Portfolio Portfolio Allocation Evaluation
-total_portfolio_value = sum(st.session_state.portfolio_holdings.values())
-portfolio_analysis_data = []
-
-st.subheader("Current Structural Portfolio Drift Analysis")
-p_col1, p_col2 = st.columns([2, 1])
-
-with p_col1:
-    drift_alerts = []
-    rebalance_suggestions = {}
+# ------------------------------------------
+# TAB 1: MONTHLY OVERVIEW DASHBOARD
+# ------------------------------------------
+with tab_dashboard:
+    st.subheader("Current Month Capital Architecture")
     
-    for asset, current_value in st.session_state.portfolio_holdings.items():
-        actual_weight = current_value / total_portfolio_value if total_portfolio_value > 0 else 0.0
-        target_weight = target_weights[asset]
-        drift = actual_weight - target_weight
+    # Core Summary Cards
+    d_col1, d_col2, d_col3, d_col4 = st.columns(4)
+    d_col1.metric("Fixed Structural Outflows", f"₹{total_fixed_structural_outflow:,.2f}")
+    d_col2.metric("Essentials Pool (50%)", f"₹{essentials_target:,.2f}")
+    d_col3.metric("Goal Sinking Provisions", f"₹{total_monthly_goal_sinking:,.2f}")
+    d_col4.metric("Guilt-Free Spending Cash", f"₹{net_discretionary_guilt_free:,.2f}")
+    
+    st.markdown("---")
+    
+    chart_col1, chart_col2 = st.columns(2)
+    with chart_col1:
+        st.markdown("#### Complete Salary Capital Allocation")
+        alloc_map = {
+            "Structural Loan EMIs": home_loan_emi + personal_loan_emi,
+            "Property Tax Sinking Funds": monthly_property_tax_cushion,
+            "Fixed Utility Outlays": total_monthly_utilities,
+            "Remaining Operational Essentials": max(0.0, essentials_target - total_monthly_utilities),
+            "Active Goal Allocations": total_monthly_goal_sinking,
+            "Net Discretionary Runway": net_discretionary_guilt_free,
+            "Strategic Investment Tranche": investing_target
+        }
+        st.plotly_chart(px.pie(names=list(alloc_map.keys()), values=list(alloc_map.values()), color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
         
-        portfolio_analysis_data.append({
-            "Asset Class": asset,
-            "Current Valuation": current_value,
-            "Actual Weight": f"{actual_weight*100:.1f}%",
-            "Target Weight": f"{target_weight*100:.1f}%",
-            "Drift Variance": f"{drift*100:+.1f}%"
-        })
-        
-        # Trigger insight conditions if drift variance exceeding thresholds (e.g. +/- 5%)
-        if abs(drift) >= 0.05:
-            direction = "OVERWEIGHT 📈" if drift > 0 else "UNDERWEIGHT 📉"
-            drift_alerts.append(f"⚠️ **{asset}** class has drifted to **{actual_weight*100:.1f}%** (Target: {target_weight*100:.1f}%). It is currently **{direction}** by **{abs(drift)*100:.1f}%**.")
+    with chart_col2:
+        st.markdown("#### Sinking Goals Tracking Index")
+        calculated_goals = []
+        for goal in st.session_state.goals:
+            target_date = datetime.strptime(goal["Date"], "%Y-%m-%d")
+            rem_mo = max(1, (target_date.year - current_date.year) * 12 + (target_date.month - current_date.month))
+            runrate = max(0.0, goal["Target"] - goal["Saved"]) / rem_mo
+            calculated_goals.append({"Goal Name": goal["Name"], "Target (INR)": goal["Target"], "Saved Pool (INR)": goal["Saved"], "Required Runrate / Mo": runrate})
             
-        # Strategy Recommendation Router
-        if drift > 0:
-            rebalance_suggestions[asset] = "Reduce new distribution inflow. Market appreciation has exceeded strategic target profiles."
-        elif drift < 0:
-            rebalance_suggestions[asset] = f"🎯 TARGET BUY: Divert a larger chunk of this month's ₹{monthly_investment_bucket:,.2f} savings pool to correct this shortfall."
+        st.dataframe(pd.DataFrame(calculated_goals), use_container_width=True, hide_index=True)
+        for g in calculated_goals:
+            pct = min(g["Saved Pool (INR)"] / g["Target (INR)"], 1.0)
+            st.caption(f"**{g['Goal Name']}** Progress: {pct*100:.1f}%")
+            st.progress(pct)
+
+# ------------------------------------------
+# TAB 2: PREDICTIVE CASH FLOW RUNWAY
+# ------------------------------------------
+with tab_runway:
+    st.subheader("6-Month Liquidity Forecast Model")
+    st.write("This engine analyzes your fixed expenditures alongside your spending rate to project cash flow sustainability trends.")
+    
+    expenses_df = load_expenses_from_db()
+    current_month_str = datetime.today().strftime('%Y-%m')
+    current_month_expenses = expenses_df[expenses_df['date'].str.startswith(current_month_str)] if not expenses_df.empty else pd.DataFrame()
+    avg_monthly_discretionary_spend = current_month_expenses[current_month_expenses['category'] == "Discretionary (Wants)"]['amount'].sum() if not current_month_expenses.empty else 15000.0
+    
+    spending_multiplier = st.slider("Simulate Variable Discretionary Spending Velocity:", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
+    simulated_spend = avg_monthly_discretionary_spend * spending_multiplier
+    
+    # 6-Month Projection Math
+    runway_projection = []
+    simulated_liquid_cash = st.session_state.portfolio_holdings["Emergency/Liquid"]
+    
+    for i in range(1, 7):
+        future_date = datetime.today() + timedelta(days=i*30)
+        month_label = future_date.strftime('%b %Y')
+        monthly_inflow = gross_salary
+        total_monthly_outflow = total_fixed_structural_outflow + total_monthly_utilities + total_monthly_goal_sinking + simulated_spend + investing_target
+        
+        simulated_liquid_cash += (monthly_inflow - total_monthly_outflow)
+        runway_projection.append({"Month": month_label, "Projected Liquid Buffer": max(0.0, simulated_liquid_cash), "Safety Threshold Floor": 30000.0})
+        
+    runway_df = pd.DataFrame(runway_projection)
+    fig_runway = px.line(runway_df, x="Month", y=["Projected Liquid Buffer", "Safety Threshold Floor"], labels={"value": "Amount (INR)"}, color_discrete_sequence=["#00CC96", "#EF553B"])
+    st.plotly_chart(fig_runway, use_container_width=True)
+    
+    if runway_df.iloc[-1]["Projected Liquid Buffer"] < 30000.0:
+        st.error(f"🚨 **Runway Warning:** Your simulated spending pace (₹{simulated_spend:,.2f}/mo) combined with recurring debt will breach your cash reserve limits within 6 months.")
+    else:
+        st.success("✅ **Runway Safe:** Cash reserves remain stable and well above your minimum security baseline.")
+
+# ------------------------------------------
+# TAB 3: TAX OPTIMIZATION MATRIX
+# ------------------------------------------
+with tab_tax:
+    st.subheader("Tax Compliance & Optimization Shield")
+    tax_col1, tax_col2 = st.columns([2, 1])
+    
+    with tax_col1:
+        st.markdown("#### Section 80C Investment Maximization")
+        max_80c_limit = 150000.0
+        current_80c = st.number_input("Enter current Financial Year Section 80C contributions (PPF, ELSS, EPF, etc):", min_value=0.0, value=85000.0, step=5000.0)
+        
+        remaining_room = max(0.0, max_80c_limit - current_80c)
+        st.progress(min(current_80c / max_80c_limit, 1.0))
+        st.caption(f"**Exemption Space Used:** ₹{current_80c:,.2f} / ₹{max_80c_limit:,.2f}")
+        
+    with tax_col2:
+        st.markdown("#### 🧠 Optimization Instructions")
+        target_debt_allocation = investing_target * get_target_weights(risk_profile)["Debt/Fixed Income"]
+        if remaining_room > 0:
+            st.info(f"**Action Plan:** You have a tax-saving shortfall of **₹{remaining_room:,.2f}**. Consider deploying this month's fixed income tranche (**₹{target_debt_allocation:,.2f}**) directly into Public Provident Fund (PPF) or ELSS mutual schemes to lower your tax liability.")
         else:
-            rebalance_suggestions[asset] = "Holding steady. Aligned perfectly with strategic risk matrix parameters."
+            st.success("🎉 Section 80C limits are maximized for the current financial cycle!")
 
-    st.dataframe(pd.DataFrame(portfolio_analysis_data), use_container_width=True, hide_index=True)
-
-with p_col2:
-    st.metric("Total Tracked Net Asset Value (NAV)", f"₹{total_portfolio_value:,.2f}")
-    fig_portfolio = px.pie(names=list(st.session_state.portfolio_holdings.keys()), values=list(st.session_state.portfolio_holdings.values()), color_discrete_sequence=px.colors.qualitative.Safe, hole=0.4)
-    st.plotly_chart(fig_portfolio, use_container_width=True)
-
-# Render Intelligent Action Insights Block
-st.subheader("🧠 Automated Rebalancing Insights")
-if drift_alerts:
-    for alert in drift_alerts:
-        st.info(alert)
-        
-    # Generate dynamic execution blueprint based on portfolio drift
-    st.markdown("### 🛠️ Strategic Capital Deployment Adjustments for This Month:")
-    adjusted_allocations = {}
-    remaining_investment = monthly_investment_bucket
+# ------------------------------------------
+# TAB 4: LOCAL TRANSACTION LEDGER
+# ------------------------------------------
+with tab_ledger:
+    st.subheader("Secure SQLite Expense Ingestion")
+    l_col1, l_col2 = st.columns([1, 2])
     
-    # Simple rebalancing execution engine math
-    underweight_assets = [a for a, v in target_weights.items() if (st.session_state.portfolio_holdings[a]/total_portfolio_value) < v]
-    
-    if underweight_assets:
-        st.write("To naturally repair the structural portfolio drift without forcing asset liquidation, alter your monthly savings pool configuration to the following distribution:")
-        for asset in target_weights.keys():
-            if asset in underweight_assets:
-                # Add extra weight premium to assets that are currently falling short
-                adjusted_allocations[asset] = target_weights[asset] + 0.15 
-            else:
-                adjusted_allocations[asset] = max(0.05, target_weights[asset] - 0.15)
+    with l_col1:
+        st.markdown("#### Log New Transaction")
+        with st.form("ledger_form", clear_on_submit=True):
+            tx_date = st.date_input("Transaction Date", datetime.today())
+            tx_desc = st.text_input("Merchant/Item Description")
+            tx_cat = st.selectbox("Category Bucket", ["Essentials (Needs)", "Discretionary (Wants)"])
+            tx_amt = st.number_input("Amount (INR)", min_value=0.0, step=50.0)
+            
+            if st.form_submit_button("Write to Database") and tx_desc:
+                save_expense_to_db(tx_date.strftime('%Y-%m-%d'), tx_desc, tx_cat, tx_amt)
+                st.success("Transaction securely written to SQLite file!")
+                st.rerun()
                 
-        # Normalize weights to exactly equal 1.0
-        total_adj_w = sum(adjusted_allocations.values())
-        adjusted_allocations = {k: (v / total_adj_w) * monthly_investment_bucket for k, v in adjusted_allocations.items()}
-        
-        for asset, amt in adjusted_allocations.items():
-            st.success(f"👉 **Deploy to {asset}**: Allocate **₹{amt:,.2f}** (Standard target was ₹{monthly_investment_bucket * target_weights[asset]:,.2f})")
-    else:
-        st.write("Strategic target bands are uniform. Maintain standard target index rules.")
-else:
-    st.success("✅ Portfolio allocation health within acceptable parameters. No critical variance detected. Stick to baseline target models.")
+    with l_col2:
+        st.markdown("#### Historical Expenses Log")
+        live_df = load_expenses_from_db()
+        if not live_df.empty:
+            st.dataframe(live_df[["date", "description", "category", "amount"]], use_container_width=True, hide_index=True)
+            
+            # Summary metrics logic
+            grp = live_df.groupby("category")["amount"].sum().reset_index()
+            spent_ess = grp[grp["category"] == "Essentials (Needs)"]["amount"].values[0] if "Essentials (Needs)" in grp["category"].values else 0.0
+            spent_wnt = grp[grp["category"] == "Discretionary (Wants)"]["amount"].values[0] if "Discretionary (Wants)" in grp["category"].values else 0.0
+            
+            st.write(f"**Essentials Budget Velocity:** Spent ₹{spent_ess:,.2f} of ₹{essentials_target:,.2f}")
+            st.progress(min(spent_ess / essentials_target, 1.0) if essentials_target > 0 else 0.0)
+            
+            st.write(f"**Discretionary Budget Velocity:** Spent ₹{spent_wnt:,.2f} of ₹{net_discretionary_guilt_free:,.2f}")
+            st.progress(min(spent_wnt / net_discretionary_guilt_free, 1.0) if net_discretionary_guilt_free > 0 else 0.0)
+        else:
+            st.info("No transaction velocity records currently stored in the database.")
 
-# ==========================================
-# 7. TRACKING & LEDGERS
-# ==========================================
-st.markdown("---")
-st.header("🛒 Monthly Spending Ledgers")
-exp1, exp2 = st.columns([1, 2])
-
-with exp1:
-    st.subheader("Log Manual Expense")
-    with st.form("expense_form", clear_on_submit=True):
-        exp_date = st.date_input("Transaction Date", datetime.today())
-        exp_desc = st.text_input("Merchant/Description")
-        exp_cat = st.selectbox("Target Allocation Bucket", ["Essentials (Needs)", "Discretionary (Wants)"])
-        exp_amt = st.number_input("Amount (INR)", min_value=0.0, step=50.0)
-        
-        if st.form_submit_button("Log Transaction") and exp_desc:
-            new_row = pd.DataFrame([{"Date": exp_date.strftime('%Y-%m-%d'), "Description": exp_desc, "Category": exp_cat, "Amount": exp_amt}])
-            st.session_state.expenses = pd.concat([st.session_state.expenses, new_row], ignore_index=True)
-            st.success("Transaction recorded.")
-
-with exp2:
-    st.subheader("Transaction Ledger")
-    if not st.session_state.expenses.empty:
-        st.dataframe(st.session_state.expenses, use_container_width=True, hide_index=True)
-        summary_df = st.session_state.expenses.groupby("Category")["Amount"].sum().reset_index()
-        
-        st.subheader("Budget Velocity Tracker")
-        for cat, b_amt in [("Essentials (Needs)", budget["Essentials (Needs)"]), ("Discretionary (Wants)", budget["Net Discretionary (Guilt-Free)"])]:
-            spent = summary_df[summary_df["Category"] == cat]["Amount"].values[0] if cat in summary_df["Category"].values else 0.0
-            remaining = b_amt - spent
-            progress = min(spent / b_amt, 1.0) if b_amt > 0 else 0.0
-            st.write(f"**{cat}**: Spent ₹{spent:,.2f} of ₹{b_amt:,.2f} ({remaining:,.2f} remaining)")
-            st.progress(progress)
-    else:
-        st.info("No transaction velocity tracked yet for the current month.")
-
-# ==========================================
-# 8. PAYDAY EXECUTION CHECKLIST
-# ==========================================
-st.markdown("---")
-st.header("📈 Payday Execution Blueprint")
-
-chk1, chk2 = st.columns([2, 1])
-with chk1:
-    st.subheader("Action Item Checklist")
+# ------------------------------------------
+# TAB 5: PAYDAY EXECUTION ROOM
+# ------------------------------------------
+with tab_payday:
+    st.subheader("System Investment Deployment Terminal")
+    st.write("Check items off once you execute your transfers on your external investment platform.")
     
-    # Set targets based on whether the rebalancing system adjusted weights or defaulted
-    final_eq = adjusted_allocations.get("Equity", monthly_investment_bucket * target_weights["Equity"]) if 'adjusted_allocations' in locals() else (monthly_investment_bucket * target_weights["Equity"])
-    final_debt = adjusted_allocations.get("Debt/Fixed Income", monthly_investment_bucket * target_weights["Debt/Fixed Income"]) if 'adjusted_allocations' in locals() else (monthly_investment_bucket * target_weights["Debt/Fixed Income"])
-    final_liquid = adjusted_allocations.get("Emergency/Liquid", monthly_investment_bucket * target_weights["Emergency/Liquid"]) if 'adjusted_allocations' in locals() else (monthly_investment_bucket * target_weights["Emergency/Liquid"])
-
-    st.session_state.sip_checklist["Equity SIP"] = st.checkbox(f"Execute Equity ETF/Fund Purchases — Recommended Target: ₹{final_eq:,.2f}", value=st.session_state.sip_checklist.get("Equity SIP", False))
-    st.session_state.sip_checklist["Debt SIP"] = st.checkbox(f"Deploy Fixed Income / Debt Sweep — Recommended Target: ₹{final_debt:,.2f}", value=st.session_state.sip_checklist.get("Debt SIP", False))
-    st.session_state.sip_checklist["Liquid Buffer"] = st.checkbox(f"Top-up Liquid Reserve Fund — Recommended Target: ₹{final_liquid:,.2f}", value=st.session_state.sip_checklist.get("Liquid Buffer", False))
-    
-    st.markdown("#### 🆕 Goal Sinking Allocations")
-    for goal in calculated_goals_list:
-        st.session_state.sip_checklist[goal["Name"]] = st.checkbox(f"Transfer Monthly Runrate for *{goal['Name']}* ➡️ Move **₹{goal['Monthly Runrate']:,.2f}** to structural savings.", value=st.session_state.sip_checklist.get(goal["Name"], False))
-
-with chk2:
-    st.subheader("System Confirmation")
-    completed = sum(st.session_state.sip_checklist.values())
-    total = len(st.session_state.sip_checklist)
-    st.metric("Tasks Fully Deployed", f"{completed} / {total}")
-    if completed == total and total > 0:
-        st.balloons()
-        st.success("Financial configuration optimized! Your wealth targets are aligned.")
+    p_room1, p_room2 = st.columns([2, 1])
+    with p_room1:
+        st.markdown("#### Open Action Requirements")
+        weights_map = get_target_weights(risk_profile)
+        
+        st.session_state.sip_checklist["Equity Core Index Target"] = st.checkbox(f"Execute Core Equity ETF / Nifty BEES Deployment — Target: ₹{investing_target * weights_map['Equity']:,.2f}", value=st.session_state.sip_checklist.get("Equity Core Index Target", False))
+        st.session_state.sip_checklist["Debt Core Target"] = st.checkbox(f"Execute Tax Optimized Fixed Income Deployment (PPF / Debt Scheme) — Target: ₹{investing_target * weights_map['Debt/Fixed Income']:,.2f}", value=st.session_state.sip_checklist.get("Debt Core Target", False))
+        st.session_state.sip_checklist["Liquid Buffer Topup"] = st.checkbox(f"Top-up Cash Reserve Cushion — Target: ₹{investing_target * weights_map['Emergency/Liquid']:,.2f}", value=st.session_state.sip_checklist.get("Liquid Buffer Topup", False))
+        
+        st.markdown("#### Goal Sinking Fund Deployments")
+        for goal in st.session_state.goals:
+            t_date = datetime.strptime(goal["Date"], "%Y-%m-%d")
+            m_left = max(1, (t_date.year - current_date.year) * 12 + (t_date.month - current_date.month))
+            g_runrate = max(0.0, goal["Target"] - goal["Saved"]) / m_left
+            st.session_state.sip_checklist[goal["Name"]] = st.checkbox(f"Transfer Target Runrate for *{goal['Name']}* ➡️ Move **₹{g_runrate:,.2f}** to structural goal account.", value=st.session_state.sip_checklist.get(goal["Name"], False))
+            
+    with p_room2:
+        st.markdown("#### Finalize & Snapshot Records")
+        done_count = sum(st.session_state.sip_checklist.values())
+        total_count = len(st.session_state.sip_checklist)
+        st.metric("Deployment Tasks Finalized", f"{done_count} / {total_count}")
+        
+        if done_count == total_count and total_count > 0:
+            st.balloons()
+            st.success("Strategic configurations executed perfectly!")
+            
+        st.markdown("---")
+        if st.button("Archive Current Month Financial Snapshot"):
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            month_key = datetime.today().strftime('%Y-%m')
+            portfolio_total = sum(st.session_state.portfolio_holdings.values())
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO historical_snapshots (month, net_salary, structural_outflows, total_invested, portfolio_value)
+                VALUES (?, ?, ?, ?, ?)
+            """, (month_key, gross_salary, total_fixed_structural_outflow, investing_target, portfolio_total))
+            conn.commit()
+            conn.close()
+            st.success(f"Snapshot compiled successfully inside local database archive for month reference ({month_key})!")

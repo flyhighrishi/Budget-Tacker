@@ -30,8 +30,8 @@ Ensure you have Python 3.8+ installed. Install the necessary calculation and vis
 
 ```bash
 pip install streamlit pandas plotly
-
-2. File Organization
+```
+###2. File Organization
 Place your application script inside your project directory. Your workspace layout should look like this:
 
 Plaintext
@@ -39,14 +39,15 @@ Budget-Tracker/
 ├── app.py          # Main application script
 ├── README.md       # Project documentation
 └── wealth.db       # Automatically generated local database file
-3. Execution
+###3. Execution
 Launch the local environment server by invoking the Streamlit module through your python terminal path:
 
-Bash
+```Bash
 python -m streamlit run app.py
+```
 The dashboard will securely initialize and open at http://localhost:8501.
 
-📈 Underlying Cash Flow Logic
+##📈 Underlying Cash Flow Logic
 The application follows a strict financial pipeline to ensure accurate disposable income tracking:
 
 Gross Monthly Salary ➡️ Minus Fixed EMIs & Tax Provisions ➡️ Net Disposable Pool
@@ -59,5 +60,5 @@ The Net Disposable Pool is then split using the 50/30/20 Rule:
 
 20% Investing Bucket: Divided into Equity, Debt, and Liquid pools according to your target risk profile strategy.
 
-🔒 Security & Local Data Privacy
+##🔒 Security & Local Data Privacy
 This platform is designed as a local-first, private workspace. All financial details, liabilities, asset classes, and transaction items are stored entirely on your own machine inside the local encrypted wealth.db file. No data is transmitted to external servers or cloud spaces.

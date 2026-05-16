@@ -129,8 +129,8 @@ def seed_default_data():
     cursor.execute("SELECT COUNT(*) FROM credit_cards")
     if cursor.fetchone()[0] == 0:
         mock_cards = [
-            ("HDFC Regalia Black", 500000.0, 45000.0, 2500.0),
-            ("ICICI Amazon Pay", 200000.0, 12000.0, 600.0)
+            ("HDFC", 500000.0, 45000.0, 2500.0),
+            ("ICICI", 200000.0, 12000.0, 600.0)
         ]
         cursor.executemany("INSERT OR REPLACE INTO credit_cards (card_name, total_limit, total_outstanding, min_outstanding) VALUES (?, ?, ?, ?)", mock_cards)
         

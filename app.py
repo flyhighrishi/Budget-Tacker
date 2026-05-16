@@ -5,7 +5,33 @@ import sqlite3
 from datetime import datetime, timedelta
 
 # ==========================================
-# 1. DATABASE LAYER & CORE INITIALIZATION
+# 1. PAGE CONFIGURATION & LAYOUT OPTIMIZATION
+# ==========================================
+st.set_page_config(page_title="Personal Wealth Engine v3", layout="wide")
+
+# Injecting Custom CSS to minimize the top header blank space
+st.markdown("""
+    <style>
+        /* Reduce padding at the top of the main container area */
+        .block-container {
+            padding-top: 1rem !important;
+            padding-bottom: 0rem !important;
+        }
+        
+        /* Compress the top structural bar height */
+        header[data-testid="stHeader"] {
+            height: 1.5rem !important;
+        }
+        
+        /* Adjust alignment padding slightly for custom tabs */
+        div[data-testid="stTabNavTabs"] {
+            padding-top: 0rem !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# ==========================================
+# 2. DATABASE LAYER & CORE INITIALIZATION
 # ==========================================
 DB_FILE = "wealth.db"
 
@@ -53,9 +79,6 @@ def seed_mock_historical_data():
 
 seed_mock_historical_data()
 
-# Page Setup
-st.set_page_config(page_title="Personal Wealth Engine v3", layout="wide")
-
 # Persistent Session Variables
 if "goals" not in st.session_state:
     st.session_state.goals = [
@@ -74,7 +97,7 @@ if "sip_checklist" not in st.session_state:
     st.session_state.sip_checklist = {}
 
 # ==========================================
-# 2. CORE MATHEMATICAL LOGIC ENGINES
+# 3. CORE MATHEMATICAL LOGIC ENGINES
 # ==========================================
 def load_expenses_from_db():
     conn = sqlite3.connect(DB_FILE)
@@ -98,7 +121,7 @@ def get_target_weights(risk_profile):
         return {"Equity": 0.75, "Debt/Fixed Income": 0.15, "Emergency/Liquid": 0.10}
 
 # ==========================================
-# 3. SIDEBAR PARAMETERS (CONTROL DECK)
+# 4. SIDEBAR PARAMETERS (CONTROL DECK)
 # ==========================================
 st.sidebar.header("🎯 Master Control Deck")
 gross_salary = st.sidebar.number_input("Monthly Net Salary (INR):", min_value=0, value=150000, step=5000)
@@ -135,7 +158,7 @@ investing_target = disposable_income_pool * 0.20
 net_discretionary_guilt_free = max(0.0, gross_discretionary - total_monthly_goal_sinking)
 
 # ==========================================
-# 4. PRIMARY NAVIGATION DECK (THE TABS)
+# 5. PRIMARY NAVIGATION DECK (THE TABS)
 # ==========================================
 st.title("💸 Personal Finance Workspace & Intelligence Center")
 st.markdown("---")

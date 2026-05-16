@@ -27,9 +27,8 @@ To eliminate UI clutter, the application workspace is organized into five dedica
 ## 🚀 Getting Started
 
 ### 1. Installation
-Ensure you have Python 3.8+ installed. Install the necessary calculation and visualization dependencies via terminal:
-
-```bash
+Ensure you have Python 3.8+ installed. Install the necessary calculation and visualization dependencies via terminal: 
+//bash
 pip install streamlit pandas plotly
 **2. File Organization**
 

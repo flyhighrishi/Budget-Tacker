@@ -1,0 +1,9 @@
+# Python virtual environments & cache
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# Local data or logs you don't want public
+*.csv
+.streamlit/

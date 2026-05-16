@@ -2,7 +2,6 @@
 
 A clean, tab-reorganized personal finance application built using **Streamlit**, **Python**, and **SQLite**. This system implements a structured cash flow hierarchy—accounting for fixed debt commitments, structural utility parameters, and recurring tax provisions—before dividing your remaining disposable income into automated spending and investment pools.
 
-
 ## 🗂️ Application Workspace Layout
 
 To eliminate UI clutter, the application workspace is organized into five dedicated functional modules using a tabbed layout:
@@ -27,28 +26,38 @@ To eliminate UI clutter, the application workspace is organized into five dedica
 ## 🚀 Getting Started
 
 ### 1. Installation
-Ensure you have Python 3.8+ installed. Install the necessary calculation and visualization dependencies via terminal:
+Ensure you have Python 3.8+ installed. Install the necessary calculation and visualization dependencies via your terminal:
 
 ```bash
 pip install streamlit pandas plotly
-**2. File Organization**
 
-Place your application script inside your project directory. Your workspace layout should look like this:PlaintextBudget-Tracker/
+2. File Organization
+Place your application script inside your project directory. Your workspace layout should look like this:
+
+Plaintext
+Budget-Tracker/
 ├── app.py          # Main application script
 ├── README.md       # Project documentation
 └── wealth.db       # Automatically generated local database file
-**3. Execution**
+3. Execution
 Launch the local environment server by invoking the Streamlit module through your python terminal path:
+
 Bash
 python -m streamlit run app.py
 The dashboard will securely initialize and open at http://localhost:8501.
-**📈 Underlying Cash Flow Logic**
 
-The application follows a strict financial pipeline to ensure accurate disposable income tracking:$$\text{Gross Monthly Salary} \longrightarrow \text{Minus Fixed EMIs \& Tax Provisions} \longrightarrow \text{Net Disposable Pool}$$
+📈 Underlying Cash Flow Logic
+The application follows a strict financial pipeline to ensure accurate disposable income tracking:
+
+Gross Monthly Salary ➡️ Minus Fixed EMIs & Tax Provisions ➡️ Net Disposable Pool
+
 The Net Disposable Pool is then split using the 50/30/20 Rule:
-**50% Essentials Bucket**: Automatically absorbs fixed base utility entries (electricity and water bills).
-**30% Discretionary Bucket:** Automatically absorbs calculated goal sinking fund contributions before displaying your remaining "guilt-free" spending money.
-**20% Investing Bucket:** Divided into Equity, Debt, and Liquid pools according to your target risk profile strategy.
-**🔒 Security & Local Data Privacy**
 
-This platform is designed as a local-first, private workspace. All financial details, liabilities, asset classes, and transaction items are stored entirely on your own machine inside the local encrypted wealth.db file. No data is transmitted to external servers.
+50% Essentials Bucket: Automatically absorbs fixed base utility entries (electricity and water bills).
+
+30% Discretionary Bucket: Automatically absorbs calculated goal sinking fund contributions before displaying your remaining "guilt-free" spending money.
+
+20% Investing Bucket: Divided into Equity, Debt, and Liquid pools according to your target risk profile strategy.
+
+🔒 Security & Local Data Privacy
+This platform is designed as a local-first, private workspace. All financial details, liabilities, asset classes, and transaction items are stored entirely on your own machine inside the local encrypted wealth.db file. No data is transmitted to external servers or cloud spaces.

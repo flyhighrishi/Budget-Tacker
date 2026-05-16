@@ -34,11 +34,12 @@ pip install streamlit pandas plotly
 ###2. File Organization
 Place your application script inside your project directory. Your workspace layout should look like this:
 
-Plaintext
+```Plaintext
 Budget-Tracker/
 ├── app.py          # Main application script
 ├── README.md       # Project documentation
 └── wealth.db       # Automatically generated local database file
+```
 ###3. Execution
 Launch the local environment server by invoking the Streamlit module through your python terminal path:
 

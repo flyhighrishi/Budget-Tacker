@@ -1,0 +1,4 @@
+Budget-Tracker/
+├── app.py          # Main application script
+├── README.md       # Project documentation
+└── wealth.db       # Automatically generated local database file

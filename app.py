@@ -90,7 +90,6 @@ def init_db():
             target_date TEXT
         )
     """)
-    # 🆕 New Persistent Credit Card Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS credit_cards (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,7 +108,6 @@ def seed_default_data():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    # Snapshot seed
     cursor.execute("SELECT COUNT(*) FROM historical_snapshots")
     if cursor.fetchone()[0] == 0:
         mock_history = [
@@ -120,7 +118,6 @@ def seed_default_data():
         ]
         cursor.executemany("INSERT OR REPLACE INTO historical_snapshots VALUES (?,?,?,?,?)", mock_history)
     
-    # Goals seed
     cursor.execute("SELECT COUNT(*) FROM goals")
     if cursor.fetchone()[0] == 0:
         mock_goals = [
@@ -129,7 +126,6 @@ def seed_default_data():
         ]
         cursor.executemany("INSERT OR REPLACE INTO goals (name, target, saved, target_date) VALUES (?, ?, ?, ?)", mock_goals)
         
-    # Credit Card Seed
     cursor.execute("SELECT COUNT(*) FROM credit_cards")
     if cursor.fetchone()[0] == 0:
         mock_cards = [
@@ -183,7 +179,6 @@ def save_goal_to_db(name, target, saved, date_str):
     finally:
         conn.close()
 
-# 🆕 New Credit Card DB Operations
 def load_cards_from_db():
     conn = sqlite3.connect(DB_FILE)
     df = pd.read_sql_query("SELECT * FROM credit_cards", conn)
@@ -215,7 +210,7 @@ def get_target_weights(risk_profile):
     else: return {"Equity": 0.75, "Debt/Fixed Income": 0.15, "Emergency/Liquid": 0.10}
 
 # ==========================================
-# 4. MASTER FINANCIAL LOGIC INTEGRATION
+# 4. MASTER FINANCIAL DECK ENGINE
 # ==========================================
 st.sidebar.header("🎯 Master Control Deck")
 gross_salary = st.sidebar.number_input("Monthly Net Salary (INR):", min_value=0, value=150000, step=5000)
@@ -236,14 +231,13 @@ total_cc_outstanding = sum(card["total_outstanding"] for card in active_cards)
 
 # Framework Structural Calculations
 monthly_property_tax_cushion = annual_property_tax / 12
-# CC Minimum payments are added to unalterable fixed commitments to insulate budget health
 total_fixed_structural_outflow = home_loan_emi + personal_loan_emi + monthly_property_tax_cushion + total_cc_minimums
 disposable_income_pool = max(0, gross_salary - total_fixed_structural_outflow)
 total_monthly_utilities = electricity_bill + water_bill
 
 risk_profile = st.sidebar.selectbox("Risk Profile Strategy:", ["Conservative", "Moderate", "Aggressive"], index=1)
 
-# Dynamic Milestones
+# Dynamic Target Milestones Parser
 active_milestones = load_goals_from_db()
 total_monthly_goal_sinking = 0.0
 current_date = datetime.today()
@@ -256,21 +250,24 @@ for goal in active_milestones:
     total_monthly_goal_sinking += runrate
     calculated_goals_list.append({"Name": goal["name"], "Target (INR)": goal["target"], "Saved (INR)": goal["saved"], "Months Remaining": months_remaining, "Runrate/Mo": runrate})
 
-# 50/30/20 Slice Allocations
+# Allocation Slices Engine
 essentials_target = disposable_income_pool * 0.50
 gross_discretionary = disposable_income_pool * 0.30
 investing_target = disposable_income_pool * 0.20
 net_discretionary_guilt_free = max(0.0, gross_discretionary - total_monthly_goal_sinking)
+target_weights = get_target_weights(risk_profile)
 
 # ==========================================
-# 5. USER WORKSPACE TABS INTERFACE
+# 5. USER WORKSPACE DECK & TABS
 # ==========================================
-tab_dashboard, tab_cards, tab_runway, tab_tax, tab_ledger, tab_payday = st.tabs([
-    "📊 Summary", "💳 Credit Cards", "🔮 Runway", "🛡️ Tax", "🛒 Ledger", "📈 Payday"
+st.title("💸 Personal Finance Workspace")
+
+tab_dashboard, tab_rebalance, tab_cards, tab_runway, tab_tax, tab_ledger, tab_payday = st.tabs([
+    "📊 Summary", "🎯 Rebalancing", "💳 Credit Cards", "🔮 Runway", "🛡️ Tax", "🛒 Ledger", "📈 Payday"
 ])
 
 # ------------------------------------------
-# TAB 1: DASHBOARD OVERVIEW
+# TAB 1: DASHBOARD OVERVIEW & SINKING FUNDS
 # ------------------------------------------
 with tab_dashboard:
     st.subheader("Current Month Framework Split")
@@ -284,7 +281,7 @@ with tab_dashboard:
     st.markdown("---")
     chart_col1, chart_col2 = st.columns(2)
     with chart_col1:
-        st.markdown("#### Complete Salary Capital Architecture")
+        st.markdown("#### Capital Distribution Architecture")
         alloc_map = {
             "Loan EMIs": home_loan_emi + personal_loan_emi,
             "Prop Tax Reserves": monthly_property_tax_cushion,
@@ -298,16 +295,100 @@ with tab_dashboard:
         st.plotly_chart(px.pie(names=list(alloc_map.keys()), values=list(alloc_map.values()), color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
         
     with chart_col2:
-        st.markdown("#### Total Liability Exposure")
-        exposure_map = {"Total Credit Card Debt": total_cc_outstanding, "Home Loan Principal Projection": home_loan_emi * 120, "Personal Loan Outstanding": personal_loan_emi * 24}
-        st.plotly_chart(px.bar(x=list(exposure_map.keys()), y=list(exposure_map.values()), labels={'x': 'Debt Pool Type', 'y': 'Outstanding Balance'}, color_discrete_sequence=["#EF553B"]), use_container_width=True)
+        st.markdown("#### Sinking Fund Registry")
+        if calculated_goals_list:
+            goals_df = pd.DataFrame(calculated_goals_list)
+            st.dataframe(goals_df[["Name", "Target (INR)", "Saved (INR)", "Runrate/Mo"]], use_container_width=True, hide_index=True)
+            for g in calculated_goals_list:
+                pct = min(g["Saved (INR)"] / g["Target (INR)"], 1.0)
+                st.caption(f"**{g['Name']}**: {pct*100:.1f}% (Required: ₹{g['Runrate/Mo']:,.0f}/mo)")
+                st.progress(pct)
+        else:
+            st.info("No active milestones tracked in memory.")
+
+    st.markdown("---")
+    st.subheader("✨ Add Milestones On-The-Go")
+    with st.form("milestone_form_universal", clear_on_submit=True):
+        new_g_name = st.text_input("Goal Identity Name")
+        new_g_target = st.number_input("Target Amount (INR)", min_value=0.0, value=50000.0, step=5000.0)
+        new_g_saved = st.number_input("Initial Saved Buffer (INR)", min_value=0.0, value=0.0, step=1000.0)
+        new_g_date = st.date_input("Target Deadline", datetime.today() + timedelta(days=365))
+        
+        if st.form_submit_button("Add Milestone to Architecture", use_container_width=True):
+            if new_g_name:
+                formatted_date = new_g_date.strftime('%Y-%m-%d')
+                if save_goal_to_db(new_g_name, new_g_target, new_g_saved, formatted_date):
+                    st.success("✨ New milestone saved successfully!")
+                    st.rerun()
+                else:
+                    st.error("❌ Duplicate goal entry identifier detected.")
 
 # ------------------------------------------
-# 🆕 TAB 2: CREDIT CARD MANAGEMENT HUB
+# 🎯 TAB 2: PORTFOLIO DRIFT & INTELLIGENT REBALANCING MATRIX
+# ------------------------------------------
+with tab_rebalance:
+    st.subheader("🎯 Portfolio Asset Variance & Smart Execution Rebalancing")
+    
+    total_portfolio_value = sum(st.session_state.portfolio_holdings.values())
+    portfolio_analysis_data = []
+    drift_alerts = []
+    adjusted_allocations = {}
+    
+    p_col1, p_col2 = st.columns([2, 1])
+    with p_col1:
+        st.markdown("#### Structural Asset Class Drift")
+        for asset, current_value in st.session_state.portfolio_holdings.items():
+            actual_weight = current_value / total_portfolio_value if total_portfolio_value > 0 else 0.0
+            target_w = target_weights[asset]
+            drift = actual_weight - target_w
+            
+            portfolio_analysis_data.append({
+                "Asset Class": asset,
+                "Current Valuation": current_value,
+                "Actual Weight": f"{actual_weight*100:.1f}%",
+                "Target Weight": f"{target_w*100:.1f}%",
+                "Drift Variance": f"{drift*100:+.1f}%"
+            })
+            
+            if abs(drift) >= 0.05:
+                direction = "OVERWEIGHT 📈" if drift > 0 else "UNDERWEIGHT 📉"
+                drift_alerts.append(f"⚠️ **{asset}** has drifted to **{actual_weight*100:.1f}%** (Target: {target_w*100:.1f}%). It is **{direction}** by **{abs(drift)*100:.1f}%**.")
+
+        st.dataframe(pd.DataFrame(portfolio_analysis_data), use_container_width=True, hide_index=True)
+        
+    with p_col2:
+        st.metric("Total Tracked Assets NAV", f"₹{total_portfolio_value:,.0f}")
+        fig_portfolio = px.pie(names=list(st.session_state.portfolio_holdings.keys()), values=list(st.session_state.portfolio_holdings.values()), color_discrete_sequence=px.colors.qualitative.Safe, hole=0.3)
+        fig_portfolio.update_layout(margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_portfolio, use_container_width=True)
+
+    st.markdown("#### 🧠 Automated Alignment Blueprint")
+    if drift_alerts:
+        for alert in drift_alerts:
+            st.info(alert)
+            
+        underweight_assets = [a for a, v in target_weights.items() if (st.session_state.portfolio_holdings[a]/total_portfolio_value) < v]
+        if underweight_assets:
+            st.write("To naturally repair the variance parameters, your standard monthly allocation blueprint has been modified:")
+            for asset in target_weights.keys():
+                if asset in underweight_assets:
+                    adjusted_allocations[asset] = target_weights[asset] + 0.15 
+                else:
+                    adjusted_allocations[asset] = max(0.05, target_weights[asset] - 0.15)
+                    
+            total_adj_w = sum(adjusted_allocations.values())
+            adjusted_allocations = {k: (v / total_adj_w) * investing_target for k, v in adjusted_allocations.items()}
+            
+            for asset, amt in adjusted_allocations.items():
+                st.success(f"👉 **Deploy to {asset}**: Allocate **₹{amt:,.0f}** (Baseline default target was ₹{investing_target * target_weights[asset]:,.0f})")
+    else:
+        st.success("✅ Portfolio weights remain within safe execution boundary bands (+/- 5%). Proceed with standard baseline target distribution structures.")
+
+# ------------------------------------------
+# 💳 TAB 3: CREDIT CARD HUB
 # ------------------------------------------
 with tab_cards:
     st.subheader("💳 Unified Credit Card Command Center")
-    
     c_col1, c_col2 = st.columns([1, 2])
     with c_col1:
         st.markdown("#### Add Card Asset on the Go")
@@ -331,14 +412,12 @@ with tab_cards:
                 utilization = (card["total_outstanding"] / card["total_limit"]) * 100 if card["total_limit"] > 0 else 0
                 st.write(f"**{card['card_name']}** (Limit: ₹{card['total_limit']:,.0f})")
                 
-                # Render parameters dynamically
                 b_col1, b_col2, b_col3 = st.columns(3)
                 b_col1.caption(f"Outstanding: ₹{card['total_outstanding']:,.0f}")
                 b_col2.caption(f"Minimum Due: ₹{card['min_outstanding']:,.0f}")
                 b_col3.caption(f"Utilization: {utilization:.1f}%")
                 st.progress(min(utilization / 100, 1.0))
                 
-                # Quick update balances sub-system
                 with st.expander(f"⚙️ Quick Update {card['card_name']} Statement Values"):
                     new_out = st.number_input("New Total Outstanding:", min_value=0.0, value=card['total_outstanding'], key=f"out_{card['id']}")
                     new_min = st.number_input("New Minimum Due:", min_value=0.0, value=card['min_outstanding'], key=f"min_{card['id']}")
@@ -351,7 +430,7 @@ with tab_cards:
             st.info("No credit cards logged in database profile yet.")
 
 # ------------------------------------------
-# TAB 3: PREDICTIVE RUNWAY
+# TAB 4: PREDICTIVE RUNWAY
 # ------------------------------------------
 with tab_runway:
     st.subheader("6-Month Liquidity Path Projections")
@@ -360,7 +439,7 @@ with tab_runway:
     current_month_expenses = expenses_df[expenses_df['date'].str.startswith(current_month_str)] if not expenses_df.empty else pd.DataFrame()
     avg_monthly_discretionary_spend = current_month_expenses[current_month_expenses['category'] == "Discretionary (Wants)"]['amount'].sum() if not current_month_expenses.empty else 15000.0
     
-    spending_multiplier = st.slider("Simulate Spending Velocity:", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
+    spending_multiplier = st.slider("Simulate Variable Spending Velocity:", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
     simulated_spend = avg_monthly_discretionary_spend * spending_multiplier
     
     runway_projection = []
@@ -380,7 +459,7 @@ with tab_runway:
     st.plotly_chart(fig_runway, use_container_width=True)
 
 # ------------------------------------------
-# TAB 4: TAX CONFIGURATION
+# TAB 5: TAX CONFIGURATION
 # ------------------------------------------
 with tab_tax:
     st.subheader("Tax Optimization Shield")
@@ -391,7 +470,7 @@ with tab_tax:
     st.caption(f"**Exemption Space Used:** ₹{current_80c:,.0f} / ₹{max_80c_limit:,.0f}")
 
 # ------------------------------------------
-# TAB 5: TRANSACTION LEDGER
+# TAB 6: TRANSACTION LEDGER
 # ------------------------------------------
 with tab_ledger:
     st.subheader("Secure SQLite Ingestion Engine")
@@ -415,15 +494,20 @@ with tab_ledger:
             st.dataframe(live_df[["date", "description", "amount"]], use_container_width=True, hide_index=True)
 
 # ------------------------------------------
-# TAB 6: PAYDAY EXECUTION TERMINAL
+# TAB 7: PAYDAY EXECUTION TERMINAL
 # ------------------------------------------
 with tab_payday:
     st.subheader("Investment Deployment Terminal")
-    weights_map = get_target_weights(risk_profile)
+    
+    # Use rebalancing-aware adjusted targets if drift exists, else default to risk profile baselines
+    final_eq = adjusted_allocations.get("Equity", investing_target * target_weights["Equity"])
+    final_debt = adjusted_allocations.get("Debt/Fixed Income", investing_target * target_weights["Debt/Fixed Income"])
+    final_liquid = adjusted_allocations.get("Emergency/Liquid", investing_target * target_weights["Emergency/Liquid"])
     
     st.markdown("#### Core System Task Matrix")
-    st.session_state.sip_checklist["Equity SIP Target"] = st.checkbox(f"Core Equity ETFs — Target: ₹{investing_target * weights_map['Equity']:,.0f}", value=st.session_state.sip_checklist.get("Equity SIP Target", False))
-    st.session_state.sip_checklist["Debt SIP Target"] = st.checkbox(f"Tax Safe Debt Sweep — Target: ₹{investing_target * weights_map['Debt/Fixed Income']:,.0f}", value=st.session_state.sip_checklist.get("Debt SIP Target", False))
+    st.session_state.sip_checklist["Equity SIP Target"] = st.checkbox(f"Core Equity ETFs — Target: ₹{final_eq:,.0f}", value=st.session_state.sip_checklist.get("Equity SIP Target", False))
+    st.session_state.sip_checklist["Debt SIP Target"] = st.checkbox(f"Tax Safe Debt Sweep — Target: ₹{final_debt:,.0f}", value=st.session_state.sip_checklist.get("Debt SIP Target", False))
+    st.session_state.sip_checklist["Liquid Buffer Topup"] = st.checkbox(f"Liquid Cash Cushion — Target: ₹{final_liquid:,.0f}", value=st.session_state.sip_checklist.get("Liquid Buffer Topup", False))
     
     st.markdown("#### Milestone Runrate Sweeps")
     for goal in calculated_goals_list:

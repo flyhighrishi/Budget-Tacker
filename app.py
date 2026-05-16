@@ -7,23 +7,17 @@ from datetime import datetime, timedelta
 # ==========================================
 # 1. PAGE CONFIGURATION & LAYOUT OPTIMIZATION
 # ==========================================
-st.set_page_config(page_title="Personal Wealth Engine v3", layout="wide")
+st.set_page_config(page_title="Personal Wealth Engine v4", layout="wide")
 
-# Injecting Custom CSS to minimize the top header blank space
 st.markdown("""
     <style>
-        /* Reduce padding at the top of the main container area */
         .block-container {
             padding-top: 1rem !important;
             padding-bottom: 0rem !important;
         }
-        
-        /* Compress the top structural bar height */
         header[data-testid="stHeader"] {
             height: 1.5rem !important;
         }
-        
-        /* Adjust alignment padding slightly for custom tabs */
         div[data-testid="stTabNavTabs"] {
             padding-top: 0rem !important;
         }
@@ -38,6 +32,7 @@ DB_FILE = "wealth.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
+    # Expense ledger table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +42,7 @@ def init_db():
             amount REAL
         )
     """)
+    # Historical net worth snapshot table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historical_snapshots (
             month TEXT PRIMARY KEY,
@@ -56,35 +52,48 @@ def init_db():
             portfolio_value REAL
         )
     """)
+    # 🆕 Permanent Goals Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE,
+            target REAL,
+            saved REAL,
+            target_date TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
 init_db()
 
-# Seed default historical data if empty
-def seed_mock_historical_data():
+def seed_default_data():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
+    # Seed historical mock data if empty
     cursor.execute("SELECT COUNT(*) FROM historical_snapshots")
     if cursor.fetchone()[0] == 0:
-        mock_data = [
+        mock_history = [
             ("2026-01", 150000.0, 44000.0, 21200.0, 480000.0),
             ("2026-02", 150000.0, 44000.0, 21200.0, 502000.0),
             ("2026-03", 150000.0, 44000.0, 21200.0, 515000.0),
             ("2026-04", 150000.0, 44000.0, 21200.0, 540000.0),
         ]
-        cursor.executemany("INSERT OR REPLACE INTO historical_snapshots VALUES (?,?,?,?,?)", mock_data)
-        conn.commit()
+        cursor.executemany("INSERT OR REPLACE INTO historical_snapshots VALUES (?,?,?,?,?)", mock_history)
+    
+    # Seed starter goals if table is empty
+    cursor.execute("SELECT COUNT(*) FROM goals")
+    if cursor.fetchone()[0] == 0:
+        mock_goals = [
+            ("Nepal Milestone Travel (Dec 2026)", 150000.0, 50000.0, "2026-12-01"),
+            ("Home Capital Buffer", 500000.0, 160000.0, "2027-06-01")
+        ]
+        cursor.executemany("INSERT OR REPLACE INTO goals (name, target, saved, target_date) VALUES (?, ?, ?, ?)", mock_goals)
+        
+    conn.commit()
     conn.close()
 
-seed_mock_historical_data()
-
-# Persistent Session Variables
-if "goals" not in st.session_state:
-    st.session_state.goals = [
-        {"Name": "Nepal Milestone Travel (Dec 2026)", "Target": 150000.0, "Saved": 50000.0, "Date": "2026-12-01"},
-        {"Name": "Home Capital Buffer", "Target": 500000.0, "Saved": 160000.0, "Date": "2027-06-01"}
-    ]
+seed_default_data()
 
 if "portfolio_holdings" not in st.session_state:
     st.session_state.portfolio_holdings = {
@@ -97,7 +106,7 @@ if "sip_checklist" not in st.session_state:
     st.session_state.sip_checklist = {}
 
 # ==========================================
-# 3. CORE MATHEMATICAL LOGIC ENGINES
+# 3. DATABASE READING & WRITING UTILITIES
 # ==========================================
 def load_expenses_from_db():
     conn = sqlite3.connect(DB_FILE)
@@ -112,6 +121,24 @@ def save_expense_to_db(date_str, desc, cat, amt):
     conn.commit()
     conn.close()
 
+def load_goals_from_db():
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query("SELECT * FROM goals", conn)
+    conn.close()
+    return df.to_dict(orient="records")
+
+def save_goal_to_db(name, target, saved, date_str):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO goals (name, target, saved, target_date) VALUES (?, ?, ?, ?)", (name, target, saved, date_str))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
 def get_target_weights(risk_profile):
     if risk_profile == "Conservative":
         return {"Equity": 0.25, "Debt/Fixed Income": 0.55, "Emergency/Liquid": 0.20}
@@ -121,7 +148,7 @@ def get_target_weights(risk_profile):
         return {"Equity": 0.75, "Debt/Fixed Income": 0.15, "Emergency/Liquid": 0.10}
 
 # ==========================================
-# 4. SIDEBAR PARAMETERS (CONTROL DECK)
+# 4. SIDEBAR MASTER CONTROL DECK
 # ==========================================
 st.sidebar.header("🎯 Master Control Deck")
 gross_salary = st.sidebar.number_input("Monthly Net Salary (INR):", min_value=0, value=150000, step=5000)
@@ -135,7 +162,7 @@ electricity_bill = st.sidebar.number_input("Avg Electricity Bill / Month (INR):"
 water_bill = st.sidebar.number_input("Avg Water Bill / Month (INR):", min_value=0, value=500, step=100)
 annual_property_tax = st.sidebar.number_input("Annual Property Tax (INR):", min_value=0, value=12000, step=1000)
 
-# Structural Calculations
+# Struct Calculations
 monthly_property_tax_cushion = annual_property_tax / 12
 total_fixed_structural_outflow = home_loan_emi + personal_loan_emi + monthly_property_tax_cushion
 disposable_income_pool = max(0, gross_salary - total_fixed_structural_outflow)
@@ -143,22 +170,36 @@ total_monthly_utilities = electricity_bill + water_bill
 
 risk_profile = st.sidebar.selectbox("Risk Appetite Strategy:", ["Conservative", "Moderate", "Aggressive"], index=1)
 
-# Goal execution processing
+# Fetch Dynamic Milestones list from DB
+active_milestones = load_goals_from_db()
+
+# Goal runtime processing
 total_monthly_goal_sinking = 0.0
 current_date = datetime.today()
-for goal in st.session_state.goals:
-    target_date = datetime.strptime(goal["Date"], "%Y-%m-%d")
-    months_remaining = max(1, (target_date.year - current_date.year) * 12 + (target_date.month - current_date.month))
-    total_monthly_goal_sinking += (max(0.0, goal["Target"] - goal["Saved"]) / months_remaining)
+calculated_goals_list = []
 
-# Budget calculations
+for goal in active_milestones:
+    target_date = datetime.strptime(goal["target_date"], "%Y-%m-%d")
+    months_remaining = max(1, (target_date.year - current_date.year) * 12 + (target_date.month - current_date.month))
+    runrate = max(0.0, goal["target"] - goal["saved"]) / months_remaining
+    total_monthly_goal_sinking += runrate
+    
+    calculated_goals_list.append({
+        "Name": goal["name"],
+        "Target (INR)": goal["target"],
+        "Saved Pool (INR)": goal["saved"],
+        "Months Left": months_remaining,
+        "Required Runrate / Mo": runrate
+    })
+
+# Framework Budget outputs
 essentials_target = disposable_income_pool * 0.50
 gross_discretionary = disposable_income_pool * 0.30
 investing_target = disposable_income_pool * 0.20
 net_discretionary_guilt_free = max(0.0, gross_discretionary - total_monthly_goal_sinking)
 
 # ==========================================
-# 5. PRIMARY NAVIGATION DECK (THE TABS)
+# 5. WORKSPACE TABS DECK
 # ==========================================
 st.title("💸 Personal Finance Workspace & Intelligence Center")
 st.markdown("---")
@@ -177,7 +218,6 @@ tab_dashboard, tab_runway, tab_tax, tab_ledger, tab_payday = st.tabs([
 with tab_dashboard:
     st.subheader("Current Month Capital Architecture")
     
-    # Core Summary Cards
     d_col1, d_col2, d_col3, d_col4 = st.columns(4)
     d_col1.metric("Fixed Structural Outflows", f"₹{total_fixed_structural_outflow:,.2f}")
     d_col2.metric("Essentials Pool (50%)", f"₹{essentials_target:,.2f}")
@@ -202,18 +242,37 @@ with tab_dashboard:
         
     with chart_col2:
         st.markdown("#### Sinking Goals Tracking Index")
-        calculated_goals = []
-        for goal in st.session_state.goals:
-            target_date = datetime.strptime(goal["Date"], "%Y-%m-%d")
-            rem_mo = max(1, (target_date.year - current_date.year) * 12 + (target_date.month - current_date.month))
-            runrate = max(0.0, goal["Target"] - goal["Saved"]) / rem_mo
-            calculated_goals.append({"Goal Name": goal["Name"], "Target (INR)": goal["Target"], "Saved Pool (INR)": goal["Saved"], "Required Runrate / Mo": runrate})
-            
-        st.dataframe(pd.DataFrame(calculated_goals), use_container_width=True, hide_index=True)
-        for g in calculated_goals:
-            pct = min(g["Saved Pool (INR)"] / g["Target (INR)"], 1.0)
-            st.caption(f"**{g['Goal Name']}** Progress: {pct*100:.1f}%")
-            st.progress(pct)
+        if calculated_goals_list:
+            st.dataframe(pd.DataFrame(calculated_goals_list), use_container_width=True, hide_index=True)
+            for g in calculated_goals_list:
+                pct = min(g["Saved Pool (INR)"] / g["Target (INR)"], 1.0)
+                st.caption(f"**{g['Name']}** Progress: {pct*100:.1f}% (Required: ₹{g['Required Runrate / Mo']:,.2f}/mo)")
+                st.progress(pct)
+        else:
+            st.info("No active milestones logged yet.")
+
+    # 🆕 NEW SECTION: ADD MILESTONES ON THE GO
+    st.markdown("---")
+    st.subheader("✨ Create a New Financial Milestone On the Go")
+    
+    with st.form("new_milestone_form", clear_on_submit=True):
+        g_col1, g_col2, g_col3, g_col4 = st.columns(4)
+        new_g_name = g_col1.text_input("Milestone Goal Name (e.g., Electric Scooter, Emergency Fund)")
+        new_g_target = g_col2.number_input("Target Amount (INR)", min_value=0.0, value=50000.0, step=5000.0)
+        new_g_saved = g_col3.number_input("Initial Saved Seed Capital (INR)", min_value=0.0, value=0.0, step=1000.0)
+        new_g_date = g_col4.date_input("Target Timeline Target Date", datetime.today() + timedelta(days=365))
+        
+        if st.form_submit_button("Add Milestone to System Architecture"):
+            if new_g_name:
+                formatted_date = new_g_date.strftime('%Y-%m-%d')
+                success = save_goal_to_db(new_g_name, new_g_target, new_g_saved, formatted_date)
+                if success:
+                    st.success(f"✨ Milestone '{new_g_name}' successfully added into SQLite backend memory! Recalculating allocations...")
+                    st.rerun()
+                else:
+                    st.error("❌ A milestone with that exact identifier name already exists in the local database.")
+            else:
+                st.warning("⚠️ Please provide a name description for the target milestone goal.")
 
 # ------------------------------------------
 # TAB 2: PREDICTIVE CASH FLOW RUNWAY
@@ -230,7 +289,6 @@ with tab_runway:
     spending_multiplier = st.slider("Simulate Variable Discretionary Spending Velocity:", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
     simulated_spend = avg_monthly_discretionary_spend * spending_multiplier
     
-    # 6-Month Projection Math
     runway_projection = []
     simulated_liquid_cash = st.session_state.portfolio_holdings["Emergency/Liquid"]
     
@@ -302,7 +360,6 @@ with tab_ledger:
         if not live_df.empty:
             st.dataframe(live_df[["date", "description", "category", "amount"]], use_container_width=True, hide_index=True)
             
-            # Summary metrics logic
             grp = live_df.groupby("category")["amount"].sum().reset_index()
             spent_ess = grp[grp["category"] == "Essentials (Needs)"]["amount"].values[0] if "Essentials (Needs)" in grp["category"].values else 0.0
             spent_wnt = grp[grp["category"] == "Discretionary (Wants)"]["amount"].values[0] if "Discretionary (Wants)" in grp["category"].values else 0.0
@@ -332,11 +389,8 @@ with tab_payday:
         st.session_state.sip_checklist["Liquid Buffer Topup"] = st.checkbox(f"Top-up Cash Reserve Cushion — Target: ₹{investing_target * weights_map['Emergency/Liquid']:,.2f}", value=st.session_state.sip_checklist.get("Liquid Buffer Topup", False))
         
         st.markdown("#### Goal Sinking Fund Deployments")
-        for goal in st.session_state.goals:
-            t_date = datetime.strptime(goal["Date"], "%Y-%m-%d")
-            m_left = max(1, (t_date.year - current_date.year) * 12 + (t_date.month - current_date.month))
-            g_runrate = max(0.0, goal["Target"] - goal["Saved"]) / m_left
-            st.session_state.sip_checklist[goal["Name"]] = st.checkbox(f"Transfer Target Runrate for *{goal['Name']}* ➡️ Move **₹{g_runrate:,.2f}** to structural goal account.", value=st.session_state.sip_checklist.get(goal["Name"], False))
+        for goal in calculated_goals_list:
+            st.session_state.sip_checklist[goal["Name"]] = st.checkbox(f"Transfer Target Runrate for *{goal['Name']}* ➡️ Move **₹{goal['Required Runrate / Mo']:,.2f}** to structural goal account.", value=st.session_state.sip_checklist.get(goal["Name"], False))
             
     with p_room2:
         st.markdown("#### Finalize & Snapshot Records")
